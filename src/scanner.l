@@ -2,9 +2,21 @@
 %option nounput
 %option noinput
 
+/*
+ * ============================================================
+ *  Scanner States
+ * ============================================================
+ *  These are exclusive start conditions used when the scanner
+ *  enters a special context.
+ *
+ *  INITIAL : normal tokenizing mode
+ *  COMMENT : inside a C-style comment
+ *  STRING  : inside a string literal "..."
+ */
 %x COMMENT
 %x STRING
 
+/* C declarations used by rule actions and helper functions. */
 %{
 #include <stdint.h>
 #include <stdio.h>
@@ -20,9 +32,10 @@ uint32_t line_num = 1;
 uint32_t col_num = 1;
 static uint32_t opt_src = 1;
 static uint32_t opt_tok = 1;
+/* Source listing buffer/state. */
 static char *current_line = NULL;
 static size_t current_line_cap = 0;
-
+/* Current string-literal buffer/state. */
 static char *string_buf = NULL;
 static size_t string_len = 0;
 static size_t string_cap = 0;
@@ -39,21 +52,30 @@ static void handlePseudocomment(const char *text);
 
 %}
 
+/*
+ * ============================================================
+ *  Reusable Regex Definitions
+ * ============================================================
+ *  These named patterns are building blocks for the rules
+ *  section. Defining them here keeps the matching rules shorter
+ *  and easier to read.
+ */
 LETTER          [A-Za-z]
 DIGIT           [0-9]
 ID              {LETTER}({LETTER}|{DIGIT})*
 DEC_INT         0|[1-9]{DIGIT}*
 OCT_INT         0[0-7]+
+
 FLOAT_FRAC      0|{DIGIT}*[1-9]
 NONZERO_FRAC    {DIGIT}*[1-9]
 FLOAT           ({DEC_INT})\.({FLOAT_FRAC})
+
 SCI_COEFF       ([1-9]{DIGIT}*|[1-9]{DIGIT}*\.({FLOAT_FRAC})|0\.({NONZERO_FRAC}))
 SCI_EXP         [+-]?(0|[1-9]{DIGIT}*)
 SCIENTIFIC      ({SCI_COEFF})[Ee]({SCI_EXP})
 PSEUDOCOMMENT   \/\/&[A-Z][+-][^\n]*
 
 %%
-
 <INITIAL>[ \t\r]+      { }
 \n                      { }
 
@@ -97,7 +119,6 @@ PSEUDOCOMMENT   \/\/&[A-Z][+-][^\n]*
 <INITIAL>{DEC_INT}       { listLiteral("integer", yytext); }
 <INITIAL>{ID}            { handleIdentifierOrWord(yytext); }
 
-    /* Catch the character which is not accepted by rules above */
 . {
     printf("Error at line %u: bad character \"%s\"\n", line_num, yytext);
     exit(-1);
@@ -105,8 +126,23 @@ PSEUDOCOMMENT   \/\/&[A-Z][+-][^\n]*
 
 %%
 
+/*
+ * ============================================================
+ *  Helper Functions
+ * ============================================================
+ *  The rules above focus on matching.
+ *  The functions below implement the actual behavior after a
+ *  match succeeds, such as:
+ *  - maintaining the current source line
+ *  - printing tokens
+ *  - accumulating string content
+ *  - deciding whether an identifier is a keyword
+ *  - handling pseudocomment options
+ */
+
 /** @note The line is printed out and flushed when a newline character is encountered. */
 static void updateCurrentLine(const char *source) {
+    // Initialize buffer
     if (current_line == NULL) {
         current_line_cap = INITIAL_LINE_CAP;
         current_line = (char *)malloc(current_line_cap);
@@ -135,11 +171,17 @@ static void updateCurrentLine(const char *source) {
     }
 }
 
+/*
+ * Grow the source-line buffer dynamically so long input lines
+ * can still be listed completely.
+ */
 static void ensureLineCapacity(size_t required_len) {
+    /* Most lines are short, so if the current buffer is already enough, just keep using it. */
     if (required_len <= current_line_cap) {
         return;
     }
 
+    /* Double the capacity each time to avoid reallocating too often on long lines. */
     size_t new_cap = current_line_cap;
     while (required_len > new_cap) {
         new_cap *= 2;
@@ -154,17 +196,20 @@ static void ensureLineCapacity(size_t required_len) {
 }
 
 static void listToken(const char *name) {
+    /* T controls token listing only; scanning still happens even when token printing is off. */
     if (opt_tok) {
         printf("<%s>\n", name);
     }
 }
 
 static void listLiteral(const char *name, const char *literal) {
+    /* Used for tokens whose actual matched text also has to be shown in the output. */
     if (opt_tok) {
         printf("<%s: %s>\n", name, literal);
     }
 }
 
+/* Start reading a new string token, so old content must be cleared first. */
 static void beginString(void) {
     if (string_buf == NULL) {
         string_cap = INITIAL_STRING_CAP;
@@ -181,6 +226,7 @@ static void beginString(void) {
 static void appendStringText(const char *text) {
     const size_t text_len = strlen(text);
 
+    /* String content may come in several matched chunks, so append instead of overwrite. */
     if (string_len + text_len + 1 > string_cap) {
         size_t new_cap = string_cap;
         while (string_len + text_len + 1 > new_cap) {
@@ -199,13 +245,16 @@ static void appendStringText(const char *text) {
 }
 
 static void appendStringChar(char ch) {
+    /* Reuse appendStringText() so single-char and multi-char appends share the same grow logic. */
     char text[2];
     text[0] = ch;
     text[1] = '\0';
     appendStringText(text);
 }
 
+/* ID 先用同一條 regex 抓進來，再在這裡分成 keyword / operator / id。 */
 static void handleIdentifierOrWord(const char *text) {
+    /* Reserved words need the KW prefix in the output format. */
     if (strcmp(text, "var") == 0 || strcmp(text, "def") == 0 ||
         strcmp(text, "array") == 0 || strcmp(text, "of") == 0 ||
         strcmp(text, "boolean") == 0 || strcmp(text, "integer") == 0 ||
@@ -222,17 +271,20 @@ static void handleIdentifierOrWord(const char *text) {
         listToken(keyword);
         return;
     }
-
+    /* These look like identifiers, but the spec says they are operators. */
     if (strcmp(text, "mod") == 0 || strcmp(text, "and") == 0 ||
         strcmp(text, "or") == 0 || strcmp(text, "not") == 0) {
         listToken(text);
         return;
     }
 
+    /* If it is neither a reserved word nor a word-operator, it is a normal id. */
     listLiteral("id", text);
 }
 
+/* The regex already guarantees the //&X+ or //&X- shape, so we only read X and +/- here. */
 static void handlePseudocomment(const char *text) {
+    /* text[3] is the option letter after //&, and text[4] is + or -. */
     switch (text[3]) {
     case 'S':
         opt_src = (text[4] == '+');
@@ -251,7 +303,7 @@ static void handlePseudocomment(const char *text) {
  * times in the past.
  */
 int yywrap(void) {
-    /* If the file is not ended with a newline, fake it to print out the last line. */
+    /* Without this, the last source line would not be listed if the file ends without '\n'. */
     if (col_num > 1) {
         updateCurrentLine("\n");
     }
@@ -260,6 +312,7 @@ int yywrap(void) {
 }
 
 int main(int argc, const char **argv) {
+    /* This homework expects the scanner to read exactly one input file from argv[1]. */
     if (argc != 2) {
         fprintf(stderr, "Usage: %s [filename]\n", argv[0]);
         exit(-1);
@@ -271,6 +324,7 @@ int main(int argc, const char **argv) {
         exit(-1);
     }
 
+    /* yylex() is the scanner entry generated by flex from the rules section above. */
     yylex();
 
     fclose(yyin);
