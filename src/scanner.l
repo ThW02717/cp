@@ -11,8 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_LINE_LEN 512
 #define INITIAL_STRING_CAP 64
+#define INITIAL_LINE_CAP 512
 /* Code runs each time a token is matched. */
 #define YY_USER_ACTION updateCurrentLine(yytext);
 
@@ -20,13 +20,15 @@ uint32_t line_num = 1;
 uint32_t col_num = 1;
 static uint32_t opt_src = 1;
 static uint32_t opt_tok = 1;
-static char current_line[MAX_LINE_LEN];
+static char *current_line = NULL;
+static size_t current_line_cap = 0;
 
 static char *string_buf = NULL;
 static size_t string_len = 0;
 static size_t string_cap = 0;
 
 static void updateCurrentLine(const char *source);
+static void ensureLineCapacity(size_t required_len);
 static void listToken(const char *name);
 static void listLiteral(const char *name, const char *literal);
 static void beginString(void);
@@ -105,6 +107,16 @@ PSEUDOCOMMENT   \/\/&[A-Z][+-][^\n]*
 
 /** @note The line is printed out and flushed when a newline character is encountered. */
 static void updateCurrentLine(const char *source) {
+    if (current_line == NULL) {
+        current_line_cap = INITIAL_LINE_CAP;
+        current_line = (char *)malloc(current_line_cap);
+        if (current_line == NULL) {
+            fprintf(stderr, "Out of memory\n");
+            exit(-1);
+        }
+        current_line[0] = '\0';
+    }
+
     /* col_num is one-based */
     for (const char *c = source; *c; ++c) {
         if (*c == '\n') {
@@ -115,13 +127,30 @@ static void updateCurrentLine(const char *source) {
             col_num = 1;
             current_line[0] = '\0';
         } else {
-            if (col_num < MAX_LINE_LEN) {
-                current_line[col_num - 1] = *c;
-                current_line[col_num] = '\0';
-            }
+            ensureLineCapacity(col_num + 1);
+            current_line[col_num - 1] = *c;
+            current_line[col_num] = '\0';
             ++col_num;
         }
     }
+}
+
+static void ensureLineCapacity(size_t required_len) {
+    if (required_len <= current_line_cap) {
+        return;
+    }
+
+    size_t new_cap = current_line_cap;
+    while (required_len > new_cap) {
+        new_cap *= 2;
+    }
+
+    current_line = (char *)realloc(current_line, new_cap);
+    if (current_line == NULL) {
+        fprintf(stderr, "Out of memory\n");
+        exit(-1);
+    }
+    current_line_cap = new_cap;
 }
 
 static void listToken(const char *name) {
@@ -245,6 +274,7 @@ int main(int argc, const char **argv) {
     yylex();
 
     fclose(yyin);
+    free(current_line);
     free(string_buf);
     /* Free resources used by the scanner; otherwise, unused data structures
     will persist throughout the successive compiler phases. */
