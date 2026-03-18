@@ -47,7 +47,7 @@ static void listLiteral(const char *name, const char *literal);
 static void beginString(void);
 static void appendStringText(const char *text);
 static void appendStringChar(char ch);
-static void handleIdentifierOrWord(const char *text);
+static void identifierClassify(const char *text);
 static void handlePseudocomment(const char *text);
 
 %}
@@ -117,7 +117,7 @@ PSEUDOCOMMENT   \/\/&[A-Z][+-][^\n]*
 <INITIAL>{FLOAT}         { listLiteral("float", yytext); }
 <INITIAL>{OCT_INT}       { listLiteral("oct_integer", yytext); }
 <INITIAL>{DEC_INT}       { listLiteral("integer", yytext); }
-<INITIAL>{ID}            { handleIdentifierOrWord(yytext); }
+<INITIAL>{ID}            { identifierClassify(yytext); }
 
 . {
     printf("Error at line %u: bad character \"%s\"\n", line_num, yytext);
@@ -253,7 +253,7 @@ static void appendStringChar(char ch) {
 }
 
 /* ID 先用同一條 regex 抓進來，再在這裡分成 keyword / operator / id。 */
-static void handleIdentifierOrWord(const char *text) {
+static void identifierClassify(const char *text) {
     /* Reserved words need the KW prefix in the output format. */
     if (strcmp(text, "var") == 0 || strcmp(text, "def") == 0 ||
         strcmp(text, "array") == 0 || strcmp(text, "of") == 0 ||
