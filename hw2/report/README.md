@@ -7,22 +7,43 @@
 
 ## How much time did you spend on this project
 
-About 4 hours.
+About 4 to 5 hours.
 
 ## Project overview
 
-The project is implemented with `scanner.l` and `parser.y`.
+In this homework, I mainly modified `scanner.l` and `parser.y`.
 
-In `scanner.l`, I kept the source listing and token listing behavior from the starter code, and added return values for every token so that `yyparse()` can receive tokens from `yylex()`. Single-character delimiters and operators are returned as character tokens, while reserved words, multi-character operators, identifiers, and literals are returned as named tokens defined in `parser.y`.
+For `scanner.l`, I kept the original behavior for printing source lines and tokens, but changed the actions so that the scanner also returns tokens to the parser. For example, identifiers return `ID`, reserved words return their corresponding token names, and symbols such as `+`, `-`, `(`, `)` are returned as character tokens. This lets `yyparse()` use the scanner output instead of only printing tokens like in hw1.
 
-In `parser.y`, I implemented the grammar for program units, declarations, scalar and array types, function declarations and definitions, compound statements, simple statements, conditionals, loops, return statements, variable references, function calls, literals, and expressions. The parser only checks syntax in this assignment. Semantic errors such as type mismatches are not checked.
+I also kept the pseudo-comment options such as `//&S+`, `//&S-`, `//&T+`, and `//&T-`, so the output format still follows the requirement from hw1.
 
-Expression grammar uses bison precedence declarations to parse unary operators, binary arithmetic operators, relational operators, and logical operators. This also handles consecutive unary operators such as `--x` and `not not x`.
+For `parser.y`, I wrote the grammar rules according to the homework spec. The parser supports program structure, declarations, scalar types, array types, function declarations, function definitions, compound statements, assignment, print, read, if-else, while, for, return statements, function calls, variable references, and expressions.
+
+I separated the grammar into smaller parts, such as `declaration_list`, `function_list`, `statement_list`, `identifier_list`, `formal_argument_list`, and `expression_list`. This made it easier to represent the optional and repeated parts in the spec. For array types and array references, I used recursive rules, so declarations like `array 4 of array 2 of integer` and references like `a[i][j]` can be parsed.
+
+For expressions, I used bison precedence declarations to handle arithmetic, relational, logical, and unary operators. This also makes cases like `--b` and `not not b` parse correctly. Parentheses are also supported, so expressions can be grouped explicitly.
+
+This homework only checks syntax, so I did not handle semantic errors such as type mismatch, undeclared variables, wrong return type, or wrong number of function arguments. For example, an expression like `3 + true` is syntactically valid in this homework, even though it should be rejected in semantic analysis later.
+
+For testing, I ran `make test` in the docker environment, and all visible test cases passed. I also tried some extra cases by myself, including:
+
+- empty compound statements
+- function declarations and definitions with no arguments
+- multiple formal argument groups separated by semicolons
+- nested array declarations
+- multidimensional array references
+- consecutive unary operators like `--b` and `not not b`
+- declarations after statements, which should be rejected
+- function return type being an array type, which should be rejected by the grammar
 
 ## What is the hardest you think in this project
 
-The hardest part was organizing the grammar so that constructs starting with an identifier, such as variable references and function calls, can be parsed cleanly in different contexts. Another tricky part was keeping declaration blocks before statement blocks inside compound statements, since this affects syntactic error detection.
+The hardest part for me was deciding how to organize the grammar rules for expressions and statements. Some rules start with the same token, especially identifier-related rules like variable references and function calls, so I had to make sure they still parse correctly in different places.
+
+Another tricky part was handling the order inside a compound statement. Declarations must appear before statements, so a case like declaring a variable after a statement should become a syntax error.
+
+The error cases were also a little tricky because the parser should reject the input at a reasonable token. I used the sample outputs to check whether my grammar accepts and rejects programs in the expected places.
 
 ## Feedback to T.A.s
 
-good assignment
+good!
